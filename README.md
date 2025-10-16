@@ -22,18 +22,22 @@ The script reverse-engineers the Highcharts SVG visualization to extract the und
 ### Step 1: Locate the Chart
 Finds the chart container using the specific MUI classes that wrap the analytics chart.
 
-### Step 2: Extract and Expand Date Labels
-Reads the X-axis text elements to get the date range. For longer periods (90+ days), Highcharts only shows sparse labels (weekly), but the script automatically:
-- Detects the full date range from first/last visible labels
-- Generates all intermediate daily dates
-- Maps SVG path points to daily dates for full granularity
+### Step 2: Extract Accurate Date Range
+Extracts the precise date range from the page's date description element (`data-testid="date-description"`), which shows the exact start and end dates (e.g., "Data from 7/18/2025 to 10/16/2025"). The script then:
+- Parses the full date range with year information
+- Generates all daily dates from start to end (automatically handles leap years)
+- Ensures perfect alignment: first data point = first date, last data point = day before end date
+- Falls back to SVG axis labels if date description element is not found
 
 ### Step 3: Build Y-Axis Scale
 - Finds Y-axis labels (0, 25k, 50k, 75k, 100k, etc.)
 - Maps pixel positions to actual values
 - Creates a linear scale for converting SVG coordinates to real numbers
 
-### Step 4: Match Legend to Data Series
+### Step 4: Detect Date Format
+Determines whether to use slash format ("10/9") or month name format ("Oct 9") by examining the SVG axis labels.
+
+### Step 5: Match Legend to Data Series
 This is the tricky part:
 - **Legend markers** (colored shapes) are inside the SVG as `<g class="highcharts-legend-item">` elements
 - **Product names** are in separate `<div>` elements outside the SVG (with `max-width: 200px; text-overflow: ellipsis` styles)
@@ -41,7 +45,7 @@ This is the tricky part:
 - Script sorts both by screen position (top-to-bottom, left-to-right)
 - Matches them 1:1 based on position order
 
-### Step 5: Decode SVG Paths
+### Step 6: Decode SVG Paths
 - Each data series is a `<path>` element with SVG coordinates
 - Paths use Bézier curves (M and C commands) to draw the lines
 - Script extracts all coordinate points from each path
@@ -49,7 +53,7 @@ This is the tricky part:
 - Maps X coordinates to dates based on position
 - Uses 1:1 mapping when path points match date count (preserves daily granularity)
 
-### Step 6: Export Data
+### Step 7: Export Data
 Formats the extracted data as both JSON and CSV for easy analysis.
 
 ## Why We Can't Extract Data Directly
@@ -161,6 +165,11 @@ Since legend text is outside the SVG, we can't use direct parent-child relations
 - Check console output for the detected min/max values
 - Compare one known value to validate
 
+**Dates are misaligned**
+- Verify the date-description element is present on the page
+- Check console for warnings about date extraction
+- Ensure the page is fully loaded before running the script
+
 ## Files
 
 - `smart_svg_decoder.js` - Main extraction script (run in browser console)
@@ -177,23 +186,24 @@ To validate the extraction:
 4. Verify all series are labeled correctly
 5. Confirm date range matches what you selected
 
-## Date Range Granularity Support
+## Date Range Accuracy
 
-The script automatically detects and expands date ranges to maintain daily granularity:
+The script extracts the exact date range from the HTML to ensure perfect alignment:
 
 ### How It Works
-1. **Extract visible date labels** from SVG (e.g., weekly labels for 90-day views)
-2. **Calculate actual date range** by parsing first and last dates
-3. **Generate daily dates** if the range is significantly longer than visible labels
-4. **Map SVG path points** to the full daily date sequence
+1. **Extract date range from HTML** - Finds the `<span data-testid="date-description">` element containing the precise date range (e.g., "Data from 7/18/2025 to 10/16/2025")
+2. **Parse with full year information** - No more year guessing or inference errors
+3. **Generate daily dates** - Creates one date per day from start date up to (but not including) end date
+4. **Automatic leap year handling** - JavaScript Date arithmetic handles leap years correctly
+5. **Fallback to SVG labels** - If the date description element is not found, falls back to the original SVG axis label parsing
 
 ### Example
-- **Visible labels**: 13 weekly dates (Jul 21, Jul 28, Aug 4, ..., Oct 13)
-- **Actual range**: 84 days between Jul 21 and Oct 13
-- **Generated dates**: 84 daily dates (Jul 21, Jul 22, Jul 23, ..., Oct 13)
-- **Result**: CSV contains daily data, not weekly aggregates
+- **HTML date range**: "Data from 7/18/2025 to 10/16/2025"
+- **Generated dates**: 90 daily dates (7/18, 7/19, 7/20, ..., 10/15)
+- **SVG visible labels**: 13 weekly dates (might show 7/21, 7/28, 8/4, ...)
+- **Result**: Perfect alignment - first data point = 7/18, last data point = 10/15
 
-This ensures you get the same temporal resolution that's displayed in the chart, regardless of how Highcharts chooses to label the X-axis.
+This ensures the extracted data always has correct 1:1 date alignment, even for large date ranges (90+ days) where the chart only shows sparse weekly labels.
 
 ## Future Improvements
 

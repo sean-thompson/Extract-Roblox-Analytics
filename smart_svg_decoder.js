@@ -35,7 +35,29 @@
         }
     };
 
-    // Step 1: Extract date labels (X-axis)
+    // Step 1: Extract actual date range from HTML element
+    let extractedDateRange = null;
+    const dateDescElement = document.querySelector('[data-testid="date-description"]');
+
+    if (dateDescElement) {
+        const dateText = dateDescElement.textContent;
+        const dateRangeMatch = dateText.match(/Data from (\d{1,2})\/(\d{1,2})\/(\d{4}) to (\d{1,2})\/(\d{1,2})\/(\d{4})/);
+
+        if (dateRangeMatch) {
+            const [, startMonth, startDay, startYear, endMonth, endDay, endYear] = dateRangeMatch;
+            extractedDateRange = {
+                start: new Date(parseInt(startYear), parseInt(startMonth) - 1, parseInt(startDay)),
+                end: new Date(parseInt(endYear), parseInt(endMonth) - 1, parseInt(endDay))
+            };
+            console.log(`✅ Extracted date range from HTML: ${startMonth}/${startDay}/${startYear} to ${endMonth}/${endDay}/${endYear}`);
+        } else {
+            console.warn('⚠️ Found date-description element but could not parse date range');
+        }
+    } else {
+        console.warn('⚠️ Could not find date-description element, will use SVG labels');
+    }
+
+    // Step 2: Extract date labels from SVG (for format detection and fallback)
     const allTexts = Array.from(svg.querySelectorAll('text, tspan')).map(t => ({
         text: t.textContent.trim(),
         x: t.getBoundingClientRect().x,
@@ -51,10 +73,38 @@
     const visibleDates = dateElements.map(d => d.text);
     console.log(`✅ Found ${visibleDates.length} visible date labels: ${visibleDates.join(', ')}`);
 
-    // Expand dates to daily granularity for longer time periods
-    if (visibleDates.length > 1) {
-        const firstDate = visibleDates[0];
-        const lastDate = visibleDates[visibleDates.length - 1];
+    // Determine date format from SVG labels
+    const useSlashFormat = visibleDates.length > 0 && /^\d{1,2}\/\d{1,2}$/.test(visibleDates[0]);
+
+    function formatDate(date) {
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        if (useSlashFormat) {
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        } else {
+            return `${monthNames[date.getMonth()]} ${date.getDate()}`;
+        }
+    }
+
+    // Step 3: Generate daily dates from extracted range or expand SVG dates
+    if (extractedDateRange) {
+        // Use the extracted date range to generate daily dates
+        const startDate = extractedDateRange.start;
+        const endDate = extractedDateRange.end;
+        const allDates = [];
+        const currentDate = new Date(startDate);
+
+        // Generate dates up to (but not including) the end date
+        while (currentDate < endDate) {
+            allDates.push(formatDate(currentDate));
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        results.dates = allDates;
+        console.log(`✅ Generated ${allDates.length} daily dates from ${formatDate(startDate)} to ${formatDate(new Date(endDate.getTime() - 86400000))}`);
+    } else if (visibleDates.length > 1) {
+        // Fallback: expand from SVG labels
+        console.warn('⚠️ Using fallback: expanding dates from SVG labels');
 
         function parseDate(dateStr) {
             const monthMap = {
@@ -76,16 +126,8 @@
             return null;
         }
 
-        function formatDate(date, template) {
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-            if (/^\d{1,2}\/\d{1,2}$/.test(template)) {
-                return `${date.getMonth() + 1}/${date.getDate()}`;
-            } else {
-                return `${monthNames[date.getMonth()]} ${date.getDate()}`;
-            }
-        }
-
+        const firstDate = visibleDates[0];
+        const lastDate = visibleDates[visibleDates.length - 1];
         const startDate = parseDate(firstDate);
         const endDate = parseDate(lastDate);
 
@@ -98,7 +140,7 @@
                 const currentDate = new Date(startDate);
 
                 for (let i = 0; i <= daysDiff; i++) {
-                    allDates.push(formatDate(currentDate, firstDate));
+                    allDates.push(formatDate(currentDate));
                     currentDate.setDate(currentDate.getDate() + 1);
                 }
 
