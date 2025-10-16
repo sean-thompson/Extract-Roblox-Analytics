@@ -48,8 +48,71 @@
         /^\d{1,2}\/\d{1,2}$/.test(t.text)
     ).sort((a, b) => a.x - b.x);
 
-    results.dates = dateElements.map(d => d.text);
-    console.log(`✅ Found ${results.dates.length} dates: ${results.dates.join(', ')}`);
+    const visibleDates = dateElements.map(d => d.text);
+    console.log(`✅ Found ${visibleDates.length} visible date labels: ${visibleDates.join(', ')}`);
+
+    // Expand dates to daily granularity for longer time periods
+    if (visibleDates.length > 1) {
+        const firstDate = visibleDates[0];
+        const lastDate = visibleDates[visibleDates.length - 1];
+
+        function parseDate(dateStr) {
+            const monthMap = {
+                'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+                'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+            };
+
+            if (/^\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+                const [month, day] = dateStr.split('/').map(Number);
+                return new Date(new Date().getFullYear(), month - 1, day);
+            } else {
+                const match = dateStr.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)$/);
+                if (match) {
+                    const month = monthMap[match[1]];
+                    const day = parseInt(match[2]);
+                    return new Date(new Date().getFullYear(), month, day);
+                }
+            }
+            return null;
+        }
+
+        function formatDate(date, template) {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            if (/^\d{1,2}\/\d{1,2}$/.test(template)) {
+                return `${date.getMonth() + 1}/${date.getDate()}`;
+            } else {
+                return `${monthNames[date.getMonth()]} ${date.getDate()}`;
+            }
+        }
+
+        const startDate = parseDate(firstDate);
+        const endDate = parseDate(lastDate);
+
+        if (startDate && endDate && endDate > startDate) {
+            const daysDiff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+
+            if (daysDiff > visibleDates.length * 2) {
+                console.log(`📅 Expanding ${visibleDates.length} visible labels to ${daysDiff + 1} daily dates...`);
+                const allDates = [];
+                const currentDate = new Date(startDate);
+
+                for (let i = 0; i <= daysDiff; i++) {
+                    allDates.push(formatDate(currentDate, firstDate));
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+
+                results.dates = allDates;
+                console.log(`✅ Generated ${allDates.length} daily dates from ${firstDate} to ${lastDate}`);
+            } else {
+                results.dates = visibleDates;
+            }
+        } else {
+            results.dates = visibleDates;
+        }
+    } else {
+        results.dates = visibleDates;
+    }
 
     // Step 2: Extract Y-axis scale
     const yAxisTexts = allTexts.filter(t => /^\d+k?$/.test(t.text));
@@ -211,34 +274,42 @@
             return { date, value };
         });
 
-        // Group by date and average (in case multiple points map to same date)
-        const grouped = {};
-        dataPoints.forEach(p => {
-            if (!grouped[p.date]) grouped[p.date] = [];
-            grouped[p.date].push(p.value);
-        });
+        // If we have approximately the same number of points as dates, use direct mapping
+        // Otherwise, group by date and average
+        let finalData;
+        if (Math.abs(points.length - results.dates.length) <= results.dates.length * 0.2) {
+            console.log(`  Using direct 1:1 mapping (${points.length} points ≈ ${results.dates.length} dates)`);
+            finalData = dataPoints;
+        } else {
+            console.log(`  Grouping and averaging (${points.length} points → ${results.dates.length} dates)`);
+            const grouped = {};
+            dataPoints.forEach(p => {
+                if (!grouped[p.date]) grouped[p.date] = [];
+                grouped[p.date].push(p.value);
+            });
 
-        const averaged = Object.keys(grouped).map(date => ({
-            date,
-            value: Math.round(grouped[date].reduce((a, b) => a + b, 0) / grouped[date].length)
-        }));
+            finalData = Object.keys(grouped).map(date => ({
+                date,
+                value: Math.round(grouped[date].reduce((a, b) => a + b, 0) / grouped[date].length)
+            }));
+        }
 
         // Sort by date order
-        averaged.sort((a, b) => {
+        finalData.sort((a, b) => {
             const aIdx = results.dates.indexOf(a.date);
             const bIdx = results.dates.indexOf(b.date);
             return aIdx - bIdx;
         });
 
         console.log('  Data:');
-        averaged.forEach(p => {
+        finalData.forEach(p => {
             console.log(`    ${p.date}: ${p.value.toLocaleString()}`);
         });
 
         results.series.push({
             name: seriesName,
             color: stroke,
-            data: averaged
+            data: finalData
         });
     });
 

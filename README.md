@@ -22,8 +22,11 @@ The script reverse-engineers the Highcharts SVG visualization to extract the und
 ### Step 1: Locate the Chart
 Finds the chart container using the specific MUI classes that wrap the analytics chart.
 
-### Step 2: Extract Date Labels
-Reads the X-axis text elements to get the date range (e.g., "Oct 9", "Oct 10", "Oct 11"...).
+### Step 2: Extract and Expand Date Labels
+Reads the X-axis text elements to get the date range. For longer periods (90+ days), Highcharts only shows sparse labels (weekly), but the script automatically:
+- Detects the full date range from first/last visible labels
+- Generates all intermediate daily dates
+- Maps SVG path points to daily dates for full granularity
 
 ### Step 3: Build Y-Axis Scale
 - Finds Y-axis labels (0, 25k, 50k, 75k, 100k, etc.)
@@ -44,6 +47,7 @@ This is the tricky part:
 - Script extracts all coordinate points from each path
 - Converts Y coordinates back to data values using the scale
 - Maps X coordinates to dates based on position
+- Uses 1:1 mapping when path points match date count (preserves daily granularity)
 
 ### Step 6: Export Data
 Formats the extracted data as both JSON and CSV for easy analysis.
@@ -172,6 +176,24 @@ To validate the extraction:
 3. Check that Oct 12 Total ≈ 103,517 (or your expected value)
 4. Verify all series are labeled correctly
 5. Confirm date range matches what you selected
+
+## Date Range Granularity Support
+
+The script automatically detects and expands date ranges to maintain daily granularity:
+
+### How It Works
+1. **Extract visible date labels** from SVG (e.g., weekly labels for 90-day views)
+2. **Calculate actual date range** by parsing first and last dates
+3. **Generate daily dates** if the range is significantly longer than visible labels
+4. **Map SVG path points** to the full daily date sequence
+
+### Example
+- **Visible labels**: 13 weekly dates (Jul 21, Jul 28, Aug 4, ..., Oct 13)
+- **Actual range**: 84 days between Jul 21 and Oct 13
+- **Generated dates**: 84 daily dates (Jul 21, Jul 22, Jul 23, ..., Oct 13)
+- **Result**: CSV contains daily data, not weekly aggregates
+
+This ensures you get the same temporal resolution that's displayed in the chart, regardless of how Highcharts chooses to label the X-axis.
 
 ## Future Improvements
 
