@@ -35,13 +35,15 @@
         }
     };
 
-    // Step 1: Extract actual date range from HTML element
+    // Step 1: Extract actual date range from HTML date selector
     let extractedDateRange = null;
-    const dateDescElement = document.querySelector('[data-testid="date-description"]');
 
-    if (dateDescElement) {
-        const dateText = dateDescElement.textContent;
-        const dateRangeMatch = dateText.match(/Data from (\d{1,2})\/(\d{1,2})\/(\d{4}) to (\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    // Try the date selector first (MuiSelect with format "10/14/2023 - 10/16/2025")
+    const dateSelector = document.querySelector('.MuiSelect-select[aria-labelledby*="label"]');
+
+    if (dateSelector) {
+        const dateText = dateSelector.textContent.trim();
+        const dateRangeMatch = dateText.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
 
         if (dateRangeMatch) {
             const [, startMonth, startDay, startYear, endMonth, endDay, endYear] = dateRangeMatch;
@@ -49,12 +51,32 @@
                 start: new Date(parseInt(startYear), parseInt(startMonth) - 1, parseInt(startDay)),
                 end: new Date(parseInt(endYear), parseInt(endMonth) - 1, parseInt(endDay))
             };
-            console.log(`✅ Extracted date range from HTML: ${startMonth}/${startDay}/${startYear} to ${endMonth}/${endDay}/${endYear}`);
+            console.log(`✅ Extracted date range from selector: ${startMonth}/${startDay}/${startYear} to ${endMonth}/${endDay}/${endYear}`);
         } else {
-            console.warn('⚠️ Found date-description element but could not parse date range');
+            console.warn('⚠️ Found date selector but could not parse date range');
         }
-    } else {
-        console.warn('⚠️ Could not find date-description element, will use SVG labels');
+    }
+
+    // Fallback: Try the data-testid approach
+    if (!extractedDateRange) {
+        const dateDescElement = document.querySelector('[data-testid="date-description"]');
+        if (dateDescElement) {
+            const dateText = dateDescElement.textContent;
+            const dateRangeMatch = dateText.match(/Data from (\d{1,2})\/(\d{1,2})\/(\d{4}) to (\d{1,2})\/(\d{1,2})\/(\d{4})/);
+
+            if (dateRangeMatch) {
+                const [, startMonth, startDay, startYear, endMonth, endDay, endYear] = dateRangeMatch;
+                extractedDateRange = {
+                    start: new Date(parseInt(startYear), parseInt(startMonth) - 1, parseInt(startDay)),
+                    end: new Date(parseInt(endYear), parseInt(endMonth) - 1, parseInt(endDay))
+                };
+                console.log(`✅ Extracted date range from data-testid: ${startMonth}/${startDay}/${startYear} to ${endMonth}/${endDay}/${endYear}`);
+            }
+        }
+    }
+
+    if (!extractedDateRange) {
+        console.warn('⚠️ Could not find date range element, will use SVG labels');
     }
 
     // Step 2: Extract date labels from SVG (for format detection and fallback)
@@ -76,35 +98,46 @@
     // Determine date format from SVG labels
     const useSlashFormat = visibleDates.length > 0 && /^\d{1,2}\/\d{1,2}$/.test(visibleDates[0]);
 
-    function formatDate(date) {
+    function formatDate(date, includeYear = false) {
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-        if (useSlashFormat) {
-            return `${date.getMonth() + 1}/${date.getDate()}`;
+        if (includeYear) {
+            if (useSlashFormat) {
+                return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+            } else {
+                return `${monthNames[date.getMonth()]} ${date.getDate()} ${date.getFullYear()}`;
+            }
         } else {
-            return `${monthNames[date.getMonth()]} ${date.getDate()}`;
+            if (useSlashFormat) {
+                return `${date.getMonth() + 1}/${date.getDate()}`;
+            } else {
+                return `${monthNames[date.getMonth()]} ${date.getDate()}`;
+            }
         }
     }
 
-    // Step 3: Generate daily dates from extracted range or expand SVG dates
+    // Step 3: Store date range for proportional mapping (don't generate all dates yet)
     if (extractedDateRange) {
-        // Use the extracted date range to generate daily dates
+        // Calculate total days in range (end date is exclusive, so subtract 1 day)
         const startDate = extractedDateRange.start;
-        const endDate = extractedDateRange.end;
-        const allDates = [];
-        const currentDate = new Date(startDate);
+        const endDate = new Date(extractedDateRange.end.getTime() - 86400000); // Day before end date
+        const totalDays = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
 
-        // Generate dates up to (but not including) the end date
-        while (currentDate < endDate) {
-            allDates.push(formatDate(currentDate));
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
+        // Detect if range spans multiple years
+        const spanMultipleYears = startDate.getFullYear() !== endDate.getFullYear();
 
-        results.dates = allDates;
-        console.log(`✅ Generated ${allDates.length} daily dates from ${formatDate(startDate)} to ${formatDate(new Date(endDate.getTime() - 86400000))}`);
+        // Store for later use
+        results.dateRange = {
+            start: startDate,
+            end: endDate,
+            totalDays: totalDays,
+            spanMultipleYears: spanMultipleYears
+        };
+
+        console.log(`✅ Date range: ${formatDate(startDate, spanMultipleYears)} to ${formatDate(endDate, spanMultipleYears)} (${totalDays + 1} days total)`);
     } else if (visibleDates.length > 1) {
-        // Fallback: expand from SVG labels
-        console.warn('⚠️ Using fallback: expanding dates from SVG labels');
+        // Fallback: use SVG labels to determine date range
+        console.warn('⚠️ Using fallback: extracting date range from SVG labels');
 
         function parseDate(dateStr) {
             const monthMap = {
@@ -132,28 +165,22 @@
         const endDate = parseDate(lastDate);
 
         if (startDate && endDate && endDate > startDate) {
-            const daysDiff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+            const totalDays = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
 
-            if (daysDiff > visibleDates.length * 2) {
-                console.log(`📅 Expanding ${visibleDates.length} visible labels to ${daysDiff + 1} daily dates...`);
-                const allDates = [];
-                const currentDate = new Date(startDate);
+            // Detect if range spans multiple years
+            const spanMultipleYears = startDate.getFullYear() !== endDate.getFullYear();
 
-                for (let i = 0; i <= daysDiff; i++) {
-                    allDates.push(formatDate(currentDate));
-                    currentDate.setDate(currentDate.getDate() + 1);
-                }
+            results.dateRange = {
+                start: startDate,
+                end: endDate,
+                totalDays: totalDays,
+                spanMultipleYears: spanMultipleYears
+            };
 
-                results.dates = allDates;
-                console.log(`✅ Generated ${allDates.length} daily dates from ${firstDate} to ${lastDate}`);
-            } else {
-                results.dates = visibleDates;
-            }
+            console.log(`✅ Date range from SVG: ${formatDate(startDate, spanMultipleYears)} to ${formatDate(endDate, spanMultipleYears)} (${totalDays + 1} days total)`);
         } else {
-            results.dates = visibleDates;
+            console.warn('⚠️ Could not parse date range from SVG labels');
         }
-    } else {
-        results.dates = visibleDates;
     }
 
     // Step 2: Extract Y-axis scale
@@ -298,50 +325,40 @@
 
         console.log(`  Extracted ${points.length} data points`);
 
-        // Get SVG bounding box for X-axis mapping
+        // Convert points to data using proportional date mapping
         const svgBBox = svg.getBoundingClientRect();
-        const plotArea = svg.querySelector('.highcharts-plot-background');
-        const plotBBox = plotArea ? plotArea.getBoundingClientRect() : svgBBox;
-
-        // Convert points to data
-        const dataPoints = points.map((point, i) => {
-            const value = yPixelToValue(point.y + svgBBox.y);
-
-            // Map X coordinate to date index
-            const relativeX = point.x;
-            const plotWidth = plotBBox.width;
-            const dateIndex = Math.round((relativeX / plotWidth) * (results.dates.length - 1));
-            const date = results.dates[Math.min(dateIndex, results.dates.length - 1)];
-
-            return { date, value };
-        });
-
-        // If we have approximately the same number of points as dates, use direct mapping
-        // Otherwise, group by date and average
         let finalData;
-        if (Math.abs(points.length - results.dates.length) <= results.dates.length * 0.2) {
-            console.log(`  Using direct 1:1 mapping (${points.length} points ≈ ${results.dates.length} dates)`);
-            finalData = dataPoints;
-        } else {
-            console.log(`  Grouping and averaging (${points.length} points → ${results.dates.length} dates)`);
-            const grouped = {};
-            dataPoints.forEach(p => {
-                if (!grouped[p.date]) grouped[p.date] = [];
-                grouped[p.date].push(p.value);
+
+        if (results.dateRange) {
+            // Use proportional mapping: each point i maps to a date based on its position in the range
+            console.log(`  Using proportional mapping (${points.length} points across ${results.dateRange.totalDays + 1} days)`);
+
+            finalData = points.map((point, i) => {
+                const value = yPixelToValue(point.y + svgBBox.y);
+
+                // Calculate which day this point represents
+                // Point 0 = day 0 (start date), Point N-1 = day totalDays (end date)
+                const dayOffset = Math.round((i / (points.length - 1)) * results.dateRange.totalDays);
+
+                // Calculate the actual date
+                const date = new Date(results.dateRange.start.getTime() + dayOffset * 86400000);
+                const formattedDate = formatDate(date, results.dateRange.spanMultipleYears);
+
+                return { date: formattedDate, value };
             });
+        } else {
+            // Fallback: use simple sequential numbering (shouldn't happen often)
+            console.warn(`  ⚠️ No date range found, using sequential fallback`);
 
-            finalData = Object.keys(grouped).map(date => ({
-                date,
-                value: Math.round(grouped[date].reduce((a, b) => a + b, 0) / grouped[date].length)
-            }));
+            finalData = points.map((point, i) => {
+                const value = yPixelToValue(point.y + svgBBox.y);
+
+                // Generate a simple sequential date
+                const date = `Point ${i}`;
+
+                return { date, value };
+            });
         }
-
-        // Sort by date order
-        finalData.sort((a, b) => {
-            const aIdx = results.dates.indexOf(a.date);
-            const bIdx = results.dates.indexOf(b.date);
-            return aIdx - bIdx;
-        });
 
         console.log('  Data:');
         finalData.forEach(p => {
@@ -355,7 +372,49 @@
         });
     });
 
-    // Step 5: Format output
+    // Step 5: Build complete date list from all series data
+    const allDates = new Set();
+    results.series.forEach(series => {
+        series.data.forEach(point => allDates.add(point.date));
+    });
+    results.dates = Array.from(allDates).sort((a, b) => {
+        // Parse dates for sorting
+        const parseForSort = (dateStr) => {
+            const monthMap = {
+                'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+                'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+            };
+
+            // Handle "Oct 12 2023" format (with year)
+            const monthYearMatch = dateStr.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+(\d{4})$/);
+            if (monthYearMatch) {
+                return new Date(parseInt(monthYearMatch[3]), monthMap[monthYearMatch[1]], parseInt(monthYearMatch[2]));
+            }
+
+            // Handle "10/12/2023" format (with year)
+            const slashYearMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (slashYearMatch) {
+                return new Date(parseInt(slashYearMatch[3]), parseInt(slashYearMatch[1]) - 1, parseInt(slashYearMatch[2]));
+            }
+
+            // Handle "Oct 12" format (no year - fallback for single-year ranges)
+            const monthMatch = dateStr.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)$/);
+            if (monthMatch) {
+                return new Date(2000, monthMap[monthMatch[1]], parseInt(monthMatch[2]));
+            }
+
+            // Handle "10/12" format (no year - fallback)
+            const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})$/);
+            if (slashMatch) {
+                return new Date(2000, parseInt(slashMatch[1]) - 1, parseInt(slashMatch[2]));
+            }
+
+            return new Date(dateStr);
+        };
+        return parseForSort(a) - parseForSort(b);
+    });
+
+    // Step 6: Format output
     console.log('\n' + '='.repeat(60));
     console.log('EXTRACTION COMPLETE');
     console.log('='.repeat(60));
